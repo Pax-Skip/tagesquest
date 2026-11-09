@@ -59,6 +59,11 @@ export default {
         const prev = JSON.parse((await env.HEALTH.get(key)) || '{}');
         const next = { ...prev, ...clean(item), updated: Date.now() };
         if (prev.sleep && next.sleep) next.sleep = { ...prev.sleep, ...next.sleep };
+        // asleepMin fehlt? Dann aus Tief + Kern + REM berechnen (so muss der Kurzbefehl nicht rechnen).
+        if (next.sleep && next.sleep.asleepMin === undefined) {
+          const sum = (next.sleep.deepMin || 0) + (next.sleep.coreMin || 0) + (next.sleep.remMin || 0);
+          if (sum > 0) next.sleep.asleepMin = sum;
+        }
         await env.HEALTH.put(key, JSON.stringify(next), { expirationTtl: 60 * 60 * 24 * 400 });
       }
       return json(req, { ok: true, saved: list.length });
