@@ -65,6 +65,12 @@ code{word-break:break-all;color:var(--gold)}
 .wb{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
 .wb i{display:block;width:100%;background:linear-gradient(var(--acc),#5b6cff);border-radius:6px 6px 0 0;min-height:4px}.wb small{font-size:10px;color:var(--mut)}
 nav button{flex:1;padding:4px 0}
+#timerbar{position:fixed;left:10px;right:10px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:6;background:#1e2760f2;border:1px solid var(--acc);border-radius:16px;padding:10px 12px;backdrop-filter:blur(12px);box-shadow:0 8px 30px #000a}
+#timerbar[hidden]{display:none}
+.tl{display:flex;justify-content:space-between;align-items:center;font-weight:700}.tl b{font-size:26px;color:var(--gold);font-variant-numeric:tabular-nums}.tl b.go{color:var(--ok)}
+.tbtns{display:flex;gap:6px;margin-top:8px}.tbtns button{flex:1;background:#0b1130;border:1px solid #3a4590;color:var(--tx);border-radius:10px;padding:9px 0;font-weight:700;font-size:13px}
+.tbtns button[hidden]{display:none}
+.todoadd{display:flex;gap:8px;align-items:center;margin-top:8px}.todoadd .btn.sm{width:52px;margin:0;flex:none}
 .fz{display:block;font-size:10px;color:var(--acc)}
 .pausecard{padding:6px 12px;text-align:center}.linkbtn{background:none;border:0;color:var(--mut);font-size:13px;font-weight:700;padding:8px}
 .wbtns{display:flex;gap:8px}.btn.sm{padding:10px;font-size:14px;margin:8px 0 0}

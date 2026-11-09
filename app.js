@@ -206,7 +206,7 @@ function toggleSet(exId, i, el) {
     const tb = blocks.find((b) => b.id === 'train');
     if (all && tb && !d.done.train) d.done.train = { t: Date.now(), xp: 50 };
   }, rect, null);
-  if (on) floatXp(rect, '+5 XP');
+  if (on) { floatXp(rect, '+5 XP'); xRestStart(); }
   if (pr) { toast(`🏆 NEUER REKORD: ${ex.name}!`, 'gold'); confetti(); }
 }
 

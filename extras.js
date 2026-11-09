@@ -35,9 +35,85 @@ function xStreakInfo() {
 }
 const xFreezeBadge = () => { const f = xStreakInfo().freezes; return f ? `<small class="fz">❄️×${f}</small>` : ''; };
 
+/* ---------- Trainingstimer (Pause zwischen Sätzen, Trainingsdauer) ---------- */
+let _ac;
+function xBeep() {
+  try {
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (_ac.state === 'suspended') _ac.resume();
+    [0, 0.25, 0.5].forEach((t) => {
+      const o = _ac.createOscillator(), g = _ac.createGain();
+      o.frequency.value = 880; g.gain.value = 0.25; o.connect(g); g.connect(_ac.destination);
+      o.start(_ac.currentTime + t); o.stop(_ac.currentTime + t + 0.15);
+    });
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  } catch {}
+}
+function xRestStart(sec) {
+  if (sec) { try { localStorage.setItem('restPref', String(sec)); } catch {} }
+  sec = sec || +lsGet('restPref') || 90;
+  try { localStorage.setItem('restEnd', String(Date.now() + sec * 1000)); localStorage.removeItem('restFired'); } catch {}
+  try { _ac = _ac || new (window.AudioContext || window.webkitAudioContext)(); if (_ac.state === 'suspended') _ac.resume(); } catch {}
+  const key = todayKey(), d = load(key);
+  if (!d.trainStart && expanded === 'train') { d.trainStart = Date.now(); save(key, d); }
+  xTimerTick();
+}
+const xMs = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function xTimerInit() {
+  const bar = document.getElementById('timerbar');
+  if (!bar || bar.dataset.ready) return;
+  bar.dataset.ready = '1';
+  bar.innerHTML = `<div class="tl"><span id="tb-el"></span><b id="tb-rest"></b></div>
+    <div class="tbtns"><button data-act="trainstart" id="tb-start">▶ Training starten</button>
+    ${[45, 60, 90, 120].map((s) => `<button data-act="rest" data-s="${s}">${s} s</button>`).join('')}<button data-act="reststop">✕</button></div>`;
+}
+function xTimerTick() {
+  const bar = document.getElementById('timerbar');
+  if (!bar) return;
+  xTimerInit();
+  const now = Date.now(), d = load(todayKey()), end = +lsGet('restEnd') || 0;
+  const trainOpen = tab === 'today' && expanded === 'train' && !d.done.train;
+  const resting = end > now, justDone = end && !resting && now - end < 15000;
+  if (end && !resting && lsGet('restFired') !== String(end)) {
+    try { localStorage.setItem('restFired', String(end)); } catch {}
+    xBeep(); toast('⏰ Pause vorbei – nächster Satz!', 'gold');
+  }
+  if (!trainOpen && !resting && !justDone) { bar.hidden = true; return; }
+  bar.hidden = false;
+  document.getElementById('tb-el').textContent = d.trainStart && !d.done.train ? `⏱ Training ${xMs(now - d.trainStart)}` : 'Satz abhaken startet die Pause';
+  const r = document.getElementById('tb-rest');
+  r.textContent = resting ? `Pause ${xMs(end - now)}` : justDone ? 'Los! 💪' : '';
+  r.className = resting ? '' : 'go';
+  document.getElementById('tb-start').hidden = !!d.trainStart || !trainOpen;
+}
+
+/* ---------- Merkzettel / Aufgaben ---------- */
+function xTodos() { try { return JSON.parse(localStorage.getItem('todos')) || []; } catch { return []; } }
+function xSaveTodos(l) { try { localStorage.setItem('todos', JSON.stringify(l)); } catch {} xOnSaved(); }
+function xTodoXpSync() {
+  const t = todayKey();
+  mutate((d) => { d.todoXp = Math.min(5, xTodos().filter((x) => x.doneDate === t).length) * 3; });
+}
+function xTodoAdd() {
+  const el = document.getElementById('todoin'), text = el && el.value.trim();
+  if (!text) return;
+  const l = xTodos(); l.push({ id: Date.now(), text, done: false, created: todayKey() });
+  xSaveTodos(l); render();
+}
+function xTodoHtml() {
+  const t = todayKey(), l = xTodos().filter((x) => !x.done || x.doneDate === t);
+  const rows = l.map((x) => `<label class="chkrow"><input type="checkbox" data-act="todotoggle" data-id="${x.id}" ${x.done ? 'checked' : ''}>
+    <span style="flex:1;${x.done ? 'text-decoration:line-through;opacity:.6' : ''}">${x.text.replace(/</g, '&lt;')}${!x.done && x.created < t ? ' <small class="gsub">(von früher)</small>' : ''}</span>
+    <button class="linkbtn" data-act="tododel" data-id="${x.id}">✕</button></label>`).join('');
+  return `<div class="card"><div class="gtop"><b>📝 Heute noch erledigen</b><span>+3 XP je Punkt</span></div>${rows || '<div class="gsub">Nichts offen. Schreib auf, was du nicht vergessen willst.</div>'}
+    <div class="todoadd"><input id="todoin" placeholder="Neue Aufgabe oder Notiz …" enterkeyhint="done"><button class="btn sm" data-act="todoadd">＋</button></div>
+    <label class="gsub" style="display:block;margin-top:10px">Merkzettel (bleibt gespeichert)</label>
+    <textarea data-pad rows="3" placeholder="Dinge, die ich mitbekommen habe …">${(lsGet('notepad') || '').replace(/</g, '&lt;')}</textarea></div>`;
+}
+
 /* ---------- Extra-XP ---------- */
 function xDayXp(d) {
-  let x = 0;
+  let x = d.todoXp || 0;
   if ((d.water || 0) >= xcfg().waterGoal) x += 10;
   const sp = xSupps();
   if (sp.length && sp.every((s) => d.supp && d.supp[s])) x += 5;
@@ -57,6 +133,7 @@ function xToday(d) {
   const x = xcfg(), now = new Date();
   const water = d.water || 0, wp = Math.min(100, (water / x.waterGoal) * 100);
   let h = `<div class="card pausecard"><button class="linkbtn" data-act="pause">${d.pause ? '▶️ Pausentag beenden' : '⏸ Pausentag (krank / Urlaub)'}</button>${d.pause ? '<div class="gsub">Pausentag: dein Streak bleibt unberührt.</div>' : ''}</div>`;
+  h += xTodoHtml();
   h += `<div class="card"><div class="gtop"><b>💧 Wasser</b><span>${(water / 1000).toFixed(2).replace('.', ',')} / ${(x.waterGoal / 1000).toFixed(1).replace('.', ',')} L${water >= x.waterGoal ? ' ✅' : ''}</span></div>
     <div class="prog"><i style="width:${wp}%"></i></div>
     <div class="wbtns"><button class="btn sm" data-act="water" data-ml="-250">−250</button><button class="btn sm" data-act="water" data-ml="250">+250 ml</button><button class="btn sm" data-act="water" data-ml="500">+500 ml</button></div></div>`;
@@ -376,6 +453,17 @@ function xClick(t) {
   if (a === 'supp') { const n = t.dataset.n; mutate((d) => { d.supp = d.supp || {}; d.supp[n] = !d.supp[n]; }); return true; }
   if (a === 'ci') { mutate((d) => { d.checkin = d.checkin || {}; (d.checkin[t.dataset.slot] = d.checkin[t.dataset.slot] || {})[t.dataset.k] = +t.dataset.v; }, rect); return true; }
   if (a === 'pause') { mutate((d) => { d.pause = !d.pause; }); return true; }
+  if (a === 'rest') { xRestStart(+t.dataset.s); return true; }
+  if (a === 'reststop') { try { localStorage.removeItem('restEnd'); } catch {} xTimerTick(); return true; }
+  if (a === 'trainstart') { const k = todayKey(), d = load(k); d.trainStart = Date.now(); save(k, d); xTimerTick(); return true; }
+  if (a === 'todoadd') { xTodoAdd(); return true; }
+  if (a === 'todotoggle' || a === 'tododel') {
+    const l = xTodos(), id = +t.dataset.id, it = l.find((x) => x.id === id);
+    if (!it) return true;
+    if (a === 'tododel') xSaveTodos(l.filter((x) => x.id !== id));
+    else { it.done = !it.done; it.doneDate = it.done ? todayKey() : undefined; xSaveTodos(l); }
+    xTodoXpSync(); return true;
+  }
   if (a === 'pushon') { xEnablePush(); return true; }
   if (a === 'pushoff') { xDisablePush(); return true; }
   if (a === 'pushtest') { xTestPush(); return true; }
@@ -391,6 +479,7 @@ function xChange(e) {
     try { localStorage.setItem('xcfg', JSON.stringify(c)); } catch {}
     xOnSaved(); render(); return true;
   }
+  if (el.dataset.pad !== undefined) { try { localStorage.setItem('notepad', el.value); } catch {} xOnSaved(); return true; }
   if (el.dataset.rev !== undefined) { try { localStorage.setItem('rev:' + xWeekKeys()[0], el.value); } catch {} xOnSaved(); return true; }
   if (el.dataset.waist !== undefined) {
     const v = parseFloat(el.value.replace(',', '.'));
@@ -399,6 +488,8 @@ function xChange(e) {
   return false;
 }
 function xStartup() {
+  setInterval(xTimerTick, 500);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'todoin') { e.preventDefault(); xTodoAdd(); } });
   if (getToken()) {
     setTimeout(() => { if (!lsGet('backupBase')) xBackup(false); }, 4000);
     if (lsGet('pushOn') === '1') xPostState();
