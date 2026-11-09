@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tagesquest">
+<meta name="theme-color" content="#0b1020">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.svg">
+<title>Tagesquest</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app"></main>
+<div id="toasts"></div>
+<nav>
+  <button data-tab="today" class="on"><span>⚔️</span>Heute</button>
+  <button data-tab="week"><span>📅</span>Woche</button>
+  <button data-tab="profile"><span>🏆</span>Profil</button>
+</nav>
+<script src="schedule.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
