@@ -60,6 +60,7 @@ function dayXp(d) {
   let x = d.bonus || 0;
   if (goalSteps(d.health)) x += 20;
   if (goalKcal(d.health)) x += 20;
+  if (d.sleep && (sleepScore(d.sleep) || {}).score >= 70) x += 20;
   Object.values(d.done).forEach((v) => (x += v.xp || 0));
   Object.values(d.sets).forEach((arr) => arr.forEach((s) => { if (s.done) x += 5; }));
   return x;
@@ -278,6 +279,7 @@ function renderToday() {
   </div>
   <div class="prog"><i style="width:${(doneN / blocks.length) * 100}%"></i></div>
   ${goalsHtml(d)}
+  ${overviewHtml(d)}
   ${cards}
   <p class="foot">Alle Quests = Perfekter Tag (+100 XP). Pünktlich abhaken gibt +5 XP.</p>`;
 }
@@ -371,16 +373,127 @@ function renderProfile() {
     <label>Yazio Protein (g)<input data-cfg="proteinGoal" inputmode="numeric" placeholder="auto ${targetProtein()}" value="${cfg().proteinGoal || ''}"></label>
   </div><div class="gsub">Automatisch: Grundumsatz × 1,5 − 500 kcal ≈ 0,5 kg pro Woche. Trag hier deine Yazio-Ziele ein, dann gelten diese.</div></div>
   <h3>Apple Health / Yazio</h3>
-  <div class="card gsub" style="text-align:left">Safari-Apps können Apple Health nicht direkt lesen. Brücke über die Kurzbefehle-App: Aktion „Health-Beispiele suchen“ (Schritte, Aktive Energie/Nahrungsenergie, Körpergewicht) und danach „URL öffnen“:<br><code>${location.origin}${location.pathname}?steps=…&amp;kcal=…&amp;protein=…&amp;weight=…</code><br>Yazio schreibt Kalorien und Protein in Apple Health, so kommen sie mit. Die Apple Watch liefert die Schritte.</div>
+  <div class="card"><div class="gsub" style="margin-top:0">Ein Kurzbefehl auf dem iPhone schickt Schritte, Kalorien (Yazio), Puls und Schlaf (Apple Watch) an deinen privaten Server. Hier trägst du dein Token ein, danach holt die App die Daten automatisch.</div>
+    <input id="tok" type="password" placeholder="Token einfügen" value="${getToken()}" style="text-align:left;margin:8px 0">
+    <button class="btn" data-act="token">🔗 Token speichern &amp; verbinden</button>
+    <button class="btn" data-act="sync">🔄 Jetzt synchronisieren</button>
+    <div class="gsub">${syncStatus()}</div></div>
   <h3>Erinnerungen</h3>
   <button class="btn" data-act="notif">🔔 Benachrichtigungen aktivieren (${notifState})</button>
   <button class="btn" data-act="ics">📅 Kalender-Erinnerungen exportieren (.ics)</button>
   <p class="foot">Benachrichtigungen kommen, solange die App geöffnet ist. Der Kalender-Export erinnert dich auch bei geschlossener App.</p>`;
 }
 
+/* ---------- Health-Sync (Cloudflare-Worker) & Schlaf ---------- */
+const SYNC_URL = 'https://tagesquest-health.tq-mjs-2026.workers.dev';
+const SLEEP_TARGET = '22:30';
+const getToken = () => { try { return localStorage.getItem('synctoken') || ''; } catch { return ''; } };
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+function syncStatus() {
+  if (!getToken()) return 'Noch nicht verbunden.';
+  const t = +lsGet('syncAt');
+  return t ? `Zuletzt synchronisiert: ${new Date(t).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Verbunden, noch keine Daten empfangen.';
+}
+const HEALTH_KEYS = ['steps', 'kcal', 'protein', 'carbs', 'fat', 'activeKcal', 'restingHr', 'avgHr', 'maxHr', 'weight'];
+async function sync(manual) {
+  const t = getToken();
+  if (!t) { if (manual) toast('Erst Token eintragen'); return; }
+  try {
+    const r = await fetch(SYNC_URL + '/data?days=14', { headers: { Authorization: 'Bearer ' + t } });
+    if (r.status === 401) throw new Error('Token falsch');
+    if (!r.ok) throw new Error('Fehler ' + r.status);
+    const j = await r.json();
+    Object.entries(j.days || {}).forEach(([date, v]) => {
+      const d = load(date);
+      d.health = d.health || {};
+      HEALTH_KEYS.forEach((k) => { if (v[k] !== undefined) d.health[k] = v[k]; });
+      if (v.sleep) d.sleep = v.sleep;
+      save(date, d);
+    });
+    try { localStorage.setItem('syncAt', String(Date.now())); } catch {}
+    if (manual) toast('🔄 Synchronisiert');
+    checkAch();
+    if (!document.activeElement || !document.activeElement.matches('input')) render();
+  } catch (e) {
+    if (manual) toast('Sync fehlgeschlagen: ' + e.message);
+  }
+}
+
+const fmtH = (min) => `${Math.floor(min / 60)} h ${pad(Math.round(min % 60))} min`;
+// Eigener Schlaf-Score (0–100). Fehlende Teile werden herausgerechnet.
+function sleepScore(s) {
+  if (!s || !(s.asleepMin > 0)) return null;
+  const clamp = (x) => Math.max(0, Math.min(1, x));
+  const asleep = s.asleepMin;
+  const parts = [{ k: 'Dauer', w: 40, v: clamp((asleep / 60 - 4) / 3), txt: fmtH(asleep) }];
+  const inBed = s.inBedMin > 0 ? s.inBedMin : s.awakeMin !== undefined ? asleep + s.awakeMin : 0;
+  if (inBed >= asleep) {
+    const eff = asleep / inBed;
+    parts.push({ k: 'Effizienz', w: 20, v: clamp((eff - 0.75) / 0.15), txt: Math.round(eff * 100) + ' %' });
+  }
+  if (s.deepMin >= 0) parts.push({ k: 'Tiefschlaf', w: 15, v: clamp(s.deepMin / asleep / 0.13), txt: Math.round((s.deepMin / asleep) * 100) + ' %' });
+  if (s.remMin >= 0) parts.push({ k: 'REM', w: 15, v: clamp(s.remMin / asleep / 0.2), txt: Math.round((s.remMin / asleep) * 100) + ' %' });
+  if (s.bedtime) {
+    let m = mins(s.bedtime); if (m < 720) m += 1440;
+    const diff = Math.abs(m - mins(SLEEP_TARGET));
+    parts.push({ k: 'Regelmäßigkeit', w: 10, v: clamp(1 - (diff - 30) / 120), txt: s.bedtime + ' Uhr' });
+  }
+  const W = parts.reduce((a, p) => a + p.w, 0);
+  const score = Math.round((parts.reduce((a, p) => a + p.w * p.v, 0) / W) * 100);
+  return { score, parts };
+}
+const scoreLabel = (s) => (s >= 85 ? 'Sehr gut' : s >= 70 ? 'Gut' : s >= 55 ? 'Okay' : 'Schwach');
+
+function latestSleep() {
+  for (const k of allKeys().reverse()) { const d = load(k); if (d.sleep && d.sleep.asleepMin > 0) return { key: k, s: d.sleep }; }
+  return null;
+}
+
+function renderSleep() {
+  const ls = latestSleep();
+  if (!ls) return `<h2>Schlaf</h2><div class="bigstat">Noch keine Schlafdaten.</div><p class="foot">Verbinde die App im Profil mit deinem Health-Server. Sobald dein iPhone die Nacht gesendet hat, siehst du hier Score, Phasen und Verlauf.</p>`;
+  const { s, key } = ls, r = sleepScore(s);
+  const dayName = parseKey(key).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+  const bars = r.parts.map((p) => `<div class="sp"><div class="spt"><span>${p.k}</span><b>${p.txt}</b></div><div class="prog thin"><i style="width:${Math.round(p.v * 100)}%"></i></div></div>`).join('');
+  const total = (s.deepMin || 0) + (s.remMin || 0) + (s.coreMin || 0) + (s.awakeMin || 0);
+  const seg = (m, c, n) => (m > 0 && total ? `<i style="width:${(m / total) * 100}%;background:${c}" title="${n}"></i>` : '');
+  const phases = total ? `<div class="phases">${seg(s.deepMin, '#5b6cff', 'Tief')}${seg(s.coreMin, '#6aa8ff', 'Kern')}${seg(s.remMin, '#c58bff', 'REM')}${seg(s.awakeMin, '#ff8a5c', 'Wach')}</div>
+    <div class="legend"><span><i style="background:#5b6cff"></i>Tief ${Math.round(s.deepMin || 0)}′</span><span><i style="background:#6aa8ff"></i>Kern ${Math.round(s.coreMin || 0)}′</span><span><i style="background:#c58bff"></i>REM ${Math.round(s.remMin || 0)}′</span><span><i style="background:#ff8a5c"></i>Wach ${Math.round(s.awakeMin || 0)}′</span></div>` : '';
+  const week = allKeys().filter((k) => load(k).sleep).slice(-7).map((k) => {
+    const sc = (sleepScore(load(k).sleep) || {}).score || 0;
+    return `<div class="wb"><i style="height:${sc}%"></i><small>${parseKey(k).toLocaleDateString('de-DE', { weekday: 'short' })}</small></div>`;
+  }).join('');
+  const hr = load(todayKey()).health || {};
+  return `<h2>Schlaf</h2>
+  <div class="card sleephero">
+    <div class="ring" style="--p:${r.score * 3.6}deg"><div><b>${r.score}</b><small>von 100</small></div></div>
+    <div><div class="rank">${scoreLabel(r.score)}</div><div class="gsub" style="margin:2px 0">${Math.max(1, Math.round(r.score / 10))} von 10 · ${dayName}</div>
+    ${r.score >= 70 ? '<div class="xp">+20 XP für guten Schlaf</div>' : '<div class="gsub">Ab 70 gibt es +20 XP</div>'}</div>
+  </div>
+  ${phases}
+  <h3>Bewertung</h3><div class="card">${bars}</div>
+  ${hr.restingHr ? `<div class="bigstat">❤️ Ruhepuls <b>${hr.restingHr}</b> bpm</div>` : ''}
+  ${week ? `<h3>Letzte Nächte</h3><div class="weekbars">${week}</div>` : ''}
+  <p class="foot">Der Score ist eine eigene Schätzung aus Dauer (40), Effizienz (20), Tief (15), REM (15) und Regelmäßigkeit (10). Die Schlafphasen der Apple Watch sind Schätzungen, Dauer und Effizienz sind verlässlicher.</p>`;
+}
+
+function overviewHtml(d) {
+  const h = d.health || {}, tk = targetKcal(), t = [];
+  const tile = (i, v, l) => t.push(`<div class="tile"><span>${i}</span><b>${v}</b><small>${l}</small></div>`);
+  if (h.steps !== undefined) tile('👣', Math.round(h.steps).toLocaleString('de-DE'), `Schritte / ${cfg().steps.toLocaleString('de-DE')}`);
+  if (h.kcal !== undefined) { tile('🍎', Math.round(h.kcal), 'kcal gegessen'); if (tk) tile('🎯', Math.round(tk - h.kcal), 'kcal noch übrig'); }
+  if (h.activeKcal !== undefined) tile('🔥', Math.round(h.activeKcal), 'aktive kcal');
+  if (h.protein !== undefined) tile('🥩', Math.round(h.protein) + ' g', `Protein / ${targetProtein()}`);
+  if (h.restingHr !== undefined) tile('❤️', Math.round(h.restingHr), 'Ruhepuls');
+  if (h.avgHr !== undefined) tile('💓', Math.round(h.avgHr), 'Ø Puls');
+  const ls = d.sleep ? sleepScore(d.sleep) : null;
+  if (ls) tile('😴', ls.score, 'Schlaf-Score');
+  return t.length ? `<div class="tiles">${t.join('')}</div>` : '';
+}
+
 function render() {
   const keepScroll = window.scrollY;
-  app.innerHTML = tab === 'today' ? renderToday() : tab === 'week' ? renderWeek() : renderProfile();
+  app.innerHTML = tab === 'today' ? renderToday() : tab === 'week' ? renderWeek() : tab === 'sleep' ? renderSleep() : renderProfile();
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, keepScroll);
 }
@@ -395,6 +508,11 @@ document.addEventListener('click', (e) => {
   else if (a === 'set') toggleSet(t.dataset.ex, +t.dataset.i, t);
   else if (a === 'expand') { expanded = expanded === t.dataset.id ? null : t.dataset.id; render(); }
   else if (a === 'setup') saveSetup();
+  else if (a === 'sync') sync(true);
+  else if (a === 'token') {
+    try { localStorage.setItem('synctoken', $('#tok').value.trim()); } catch {}
+    sync(true);
+  }
   else if (a === 'notif') enableNotif();
   else if (a === 'ics') exportIcs();
 });
@@ -455,7 +573,8 @@ function tick() {
   if (tab === 'today' && !document.activeElement.matches('input')) render();
 }
 setInterval(tick, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); sync(false); } });
+setInterval(() => sync(false), 5 * 60 * 1000);
 
 /* ---------- Kalender-Export ---------- */
 function exportIcs() {
@@ -505,3 +624,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 render();
 checkAch();
 tick();
+sync(false);

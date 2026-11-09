@@ -1,0 +1,8 @@
+name = "tagesquest-health"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# KV-Namespace-ID wird nach `wrangler kv namespace create HEALTH` eingetragen
+[[kv_namespaces]]
+binding = "HEALTH"
+id = "bb99299ef8f44696aef40b187dbd76a1"

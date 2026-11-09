@@ -13,3 +13,6 @@ Desktop.ini
 
 # Lokale Tool-Einstellungen
 .claude/
+worker/TOKEN.txt
+worker/node_modules/
+worker/.wrangler/
