@@ -43,6 +43,62 @@ function clean(raw) {
   return out;
 }
 
+// Health Auto Export (JSON, Version 2) → Tageswerte. Namen laut Hersteller-Doku; bei Protein/Gewicht/Ruhepuls
+// werden mehrere Schreibweisen akzeptiert, da dort der exakte Name nicht dokumentiert ist.
+function convertHAE(metrics) {
+  const days = {};
+  const day = (d) => (days[d] = days[d] || { date: d, _avg: [0, 0], _w: '' , _r: '' });
+  const dk = (s) => String(s || '').slice(0, 10);
+  const kcal = (q, u) => (/kj/i.test(u || '') ? q / 4.184 : q);
+  const add = (o, k, v) => { if (Number.isFinite(v)) o[k] = (o[k] || 0) + v; };
+  for (const m of metrics) {
+    const name = String(m.name || '').toLowerCase();
+    for (const e of m.data || []) {
+      const d = dk(e.date || e.endDate);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      const o = day(d);
+      if (name === 'step_count') add(o, 'steps', e.qty);
+      else if (name === 'active_energy') add(o, 'activeKcal', kcal(e.qty, m.units));
+      else if (name === 'dietary_energy') add(o, 'kcal', kcal(e.qty, m.units));
+      else if (name === 'protein') add(o, 'protein', e.qty);
+      else if (name === 'carbohydrates') add(o, 'carbs', e.qty);
+      else if (name === 'total_fat') add(o, 'fat', e.qty);
+      else if (name === 'heart_rate') {
+        const a = e.Avg ?? e.avg ?? e.qty;
+        if (Number.isFinite(a)) { o._avg[0] += a; o._avg[1]++; }
+        const mx = e.Max ?? e.max;
+        if (Number.isFinite(mx)) o.maxHr = Math.max(o.maxHr || 0, mx);
+      } else if (name === 'resting_heart_rate') {
+        const v = e.qty ?? e.Avg;
+        if (Number.isFinite(v) && String(e.date) >= o._r) { o.restingHr = v; o._r = String(e.date); }
+      } else if (['weight_body_mass', 'weight', 'body_mass', 'weight_&_body_mass'].includes(name)) {
+        let v = e.qty;
+        if (/lb/i.test(m.units || '')) v *= 0.45359237;
+        if (Number.isFinite(v) && String(e.date) >= o._w) { o.weight = Math.round(v * 10) / 10; o._w = String(e.date); }
+      } else if (name === 'sleep_analysis') {
+        if (e.totalSleep !== undefined || e.deep !== undefined) {
+          const h = (x) => (Number.isFinite(x) ? x * 60 : undefined);
+          o.sleep = { asleepMin: h(e.totalSleep), deepMin: h(e.deep), remMin: h(e.rem), coreMin: h(e.core), awakeMin: h(e.awake) };
+          if (e.inBed > 0) o.sleep.inBedMin = h(e.inBed);
+          if (e.sleepStart) o.sleep.bedtime = String(e.sleepStart).slice(11, 16);
+        } else if (e.value) {
+          const dd = dk(e.endDate || e.end || e.date);
+          const so = day(dd);
+          so.sleep = so.sleep || {};
+          const map = { Deep: 'deepMin', Core: 'coreMin', REM: 'remMin', Awake: 'awakeMin', 'In Bed': 'inBedMin' };
+          if (map[e.value]) add(so.sleep, map[e.value], e.qty * 60);
+        }
+      }
+    }
+  }
+  return Object.values(days).map((o) => {
+    if (o._avg[1]) o.avgHr = Math.round(o._avg[0] / o._avg[1]);
+    delete o._avg; delete o._w; delete o._r;
+    for (const k of ['steps', 'activeKcal', 'kcal', 'protein', 'carbs', 'fat']) if (o[k] !== undefined) o[k] = Math.round(o[k]);
+    return o;
+  });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -52,7 +108,13 @@ export default {
     if (url.pathname === '/ingest' && req.method === 'POST') {
       let body;
       try { body = await req.json(); } catch { return json(req, { error: 'invalid json' }, 400); }
-      const list = Array.isArray(body) ? body : [body];
+      let list;
+      if (body && body.data && Array.isArray(body.data.metrics)) {
+        list = convertHAE(body.data.metrics);
+        // Zur Kontrolle: welche Metriknamen kamen wirklich an?
+        const seen = body.data.metrics.map((m) => ({ name: m.name, units: m.units, n: (m.data || []).length }));
+        await env.HEALTH.put('debug', JSON.stringify({ at: new Date().toISOString(), seen }), { expirationTtl: 60 * 60 * 24 * 30 });
+      } else list = Array.isArray(body) ? body : [body];
       for (const item of list) {
         const date = /^\d{4}-\d{2}-\d{2}$/.test(item.date || '') ? item.date : today();
         const key = 'day:' + date;
@@ -79,6 +141,7 @@ export default {
       }
       return json(req, { today: today(), days: out });
     }
+    if (url.pathname === '/debug' && req.method === 'GET') return json(req, JSON.parse((await env.HEALTH.get('debug')) || '{}'));
     return json(req, { error: 'not found' }, 404);
   },
 };
