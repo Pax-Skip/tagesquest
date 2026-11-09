@@ -16,3 +16,4 @@ Desktop.ini
 worker/TOKEN.txt
 worker/node_modules/
 worker/.wrangler/
+worker/vapid-private.json

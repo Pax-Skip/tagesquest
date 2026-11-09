@@ -34,7 +34,11 @@ const goalKcal = (h) => h && targetKcal() > 0 && h.kcal >= 1400 && h.kcal <= tar
 function load(key) {
   try { return Object.assign(blank(), JSON.parse(localStorage.getItem(K(key)))); } catch { return blank(); }
 }
-function save(key, d) { _w = null; try { localStorage.setItem(K(key), JSON.stringify(d)); } catch {} }
+function save(key, d) {
+  _w = null;
+  try { localStorage.setItem(K(key), JSON.stringify(d)); } catch {}
+  if (typeof xOnSaved === 'function') xOnSaved(key);
+}
 function allKeys() {
   const ks = [];
   try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('tag:')) ks.push(k.slice(4)); } } catch {}
@@ -61,6 +65,7 @@ function dayXp(d) {
   if (goalSteps(d.health)) x += 20;
   if (goalKcal(d.health)) x += 20;
   if (d.sleep && (sleepScore(d.sleep) || {}).score >= 70) x += 20;
+  x += xDayXp(d);
   Object.values(d.done).forEach((v) => (x += v.xp || 0));
   Object.values(d.sets).forEach((arr) => arr.forEach((s) => { if (s.done) x += 5; }));
   return x;
@@ -73,16 +78,7 @@ function completion(key) {
   const d = load(key);
   return bl.filter((b) => d.done[b.id]).length / bl.length;
 }
-function streak() {
-  let n = 0;
-  const t = new Date();
-  for (let i = 0; i < 400; i++) {
-    const dt = new Date(t.getFullYear(), t.getMonth(), t.getDate() - i);
-    const ok = completion(dateKey(dt)) >= 0.7;
-    if (ok) n++; else if (i > 0) break;
-  }
-  return n;
-}
+function streak() { return xStreakInfo().n; }
 function stats() {
   let checks = 0, perfect = 0, trainings = 0, runs = 0;
   allKeys().forEach((k) => {
@@ -160,7 +156,10 @@ function mutate(fn, rect, floatText) {
   if (floatText) floatXp(rect, floatText);
   if (!wasPerfect && isPerfect) { toast('⭐ PERFEKTER TAG! +100 XP', 'gold'); confetti(); }
   const afterL = lvl(totalXp());
-  if (afterL > beforeL) { toast(`🎉 LEVEL UP! Level ${afterL} – ${rank(afterL)}`, 'gold'); confetti(); }
+  if (afterL > beforeL) {
+    toast(`🎉 LEVEL UP! Level ${afterL} – ${rank(afterL)}`, 'gold'); confetti();
+    const rw = xReward(afterL); if (rw) toast('🎁 Belohnung: ' + rw, 'gold');
+  }
   checkAch();
   render();
 }
@@ -271,7 +270,7 @@ function renderToday() {
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="xpnum">${total - lo} / ${hi - lo} XP bis Level ${L + 1}</div>
     </div>
-    <div class="streak">🔥<b>${streak()}</b></div>
+    <div class="streak">🔥<b>${streak()}</b>${xFreezeBadge()}</div>
   </section>
   <div class="daybar">
     <div><div class="dl">${dayLabel}</div><div class="dt">${dt.icon} ${dt.label}${type ? ' · ' + type : ''}</div></div>
@@ -280,6 +279,7 @@ function renderToday() {
   <div class="prog"><i style="width:${(doneN / blocks.length) * 100}%"></i></div>
   ${goalsHtml(d)}
   ${overviewHtml(d)}
+  ${xToday(d)}
   ${cards}
   <p class="foot">Alle Quests = Perfekter Tag (+100 XP). Pünktlich abhaken gibt +5 XP.</p>`;
 }
@@ -353,7 +353,7 @@ function renderWeek() {
       <div class="prog thin"><i style="width:${Math.round(c * 100)}%"></i></div></div>
       <div class="pc">${Math.round(c * 100)}%</div></div></div>`;
   }).join('');
-  return `<h2>Diese Woche</h2><div class="bigstat"><b>${weekXp}</b> XP gesammelt</div>${rows}`;
+  return `<h2>Diese Woche</h2><div class="bigstat"><b>${weekXp}</b> XP gesammelt</div>${rows}${xReview()}`;
 }
 
 function renderProfile() {
@@ -378,7 +378,8 @@ function renderProfile() {
     <button class="btn" data-act="token">🔗 Token speichern &amp; verbinden</button>
     <button class="btn" data-act="sync">🔄 Jetzt synchronisieren</button>
     <div class="gsub">${syncStatus()}</div></div>
-  <h3>Erinnerungen</h3>
+  ${xProfile()}
+  <h3>Erinnerungen (nur bei geöffneter App)</h3>
   <button class="btn" data-act="notif">🔔 Benachrichtigungen aktivieren (${notifState})</button>
   <button class="btn" data-act="ics">📅 Kalender-Erinnerungen exportieren (.ics)</button>
   <p class="foot">Benachrichtigungen kommen, solange die App geöffnet ist. Der Kalender-Export erinnert dich auch bei geschlossener App.</p>`;
@@ -408,8 +409,10 @@ async function sync(manual) {
       d.health = d.health || {};
       HEALTH_KEYS.forEach((k) => { if (v[k] !== undefined) d.health[k] = v[k]; });
       if (v.sleep) d.sleep = v.sleep;
+      if (v.workouts) d.workouts = v.workouts;
       save(date, d);
     });
+    xAuto();
     try { localStorage.setItem('syncAt', String(Date.now())); } catch {}
     if (manual) toast('🔄 Synchronisiert');
     checkAch();
@@ -493,7 +496,7 @@ function overviewHtml(d) {
 
 function render() {
   const keepScroll = window.scrollY;
-  app.innerHTML = tab === 'today' ? renderToday() : tab === 'week' ? renderWeek() : tab === 'sleep' ? renderSleep() : renderProfile();
+  app.innerHTML = tab === 'today' ? renderToday() : tab === 'week' ? renderWeek() : tab === 'verlauf' ? renderVerlauf() : tab === 'sleep' ? renderSleep() : renderProfile();
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   window.scrollTo(0, keepScroll);
 }
@@ -504,6 +507,7 @@ document.addEventListener('click', (e) => {
   if (!t) return;
   if (t.dataset.tab) { tab = t.dataset.tab; render(); window.scrollTo(0, 0); return; }
   const a = t.dataset.act;
+  if (xClick(t)) return;
   if (a === 'block') toggleBlock(t.dataset.id, t);
   else if (a === 'set') toggleSet(t.dataset.ex, +t.dataset.i, t);
   else if (a === 'expand') { expanded = expanded === t.dataset.id ? null : t.dataset.id; render(); }
@@ -517,6 +521,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'ics') exportIcs();
 });
 document.addEventListener('change', (e) => {
+  if (xChange(e)) return;
   const el = e.target;
   if (el.dataset.cfg) {
     const c = cfg(); c[el.dataset.cfg] = parseFloat(el.value.replace(',', '.')) || c[el.dataset.cfg];
@@ -625,3 +630,4 @@ render();
 checkAch();
 tick();
 sync(false);
+xStartup();

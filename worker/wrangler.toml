@@ -2,7 +2,12 @@ name = "tagesquest-health"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# KV-Namespace-ID wird nach `wrangler kv namespace create HEALTH` eingetragen
+[vars]
+VAPID_PUBLIC = "BEw8oM93E4oYT_rO5ZlqKHRpnvzp9VON-K__-O9YKUp26vatsveYWtlIowf8Difl5GzPO_FaW6EOE2HKUK_VWBw"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
 [[kv_namespaces]]
 binding = "HEALTH"
 id = "bb99299ef8f44696aef40b187dbd76a1"
