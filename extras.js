@@ -489,6 +489,10 @@ function xChange(e) {
 }
 function xStartup() {
   setInterval(xTimerTick, 500);
+  // Beim Schließen/Wegwischen sofort sichern und den Erledigt-Stand an den Server schicken
+  const flush = () => { clearTimeout(_xpT); clearTimeout(_xbT); xPostState(); xBackup(false); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
+  window.addEventListener('pagehide', flush);
   document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'todoin') { e.preventDefault(); xTodoAdd(); } });
   if (getToken()) {
     setTimeout(() => { if (!lsGet('backupBase')) xBackup(false); }, 4000);
