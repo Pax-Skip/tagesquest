@@ -158,7 +158,10 @@ function xAuto() {
   const isStr = (x) => /strength|kraft|functional|hiit|cross|calisthen|core|training/i.test(x.name) && !isRun(x) && !isWalk(x) && !/cycl|rad/i.test(x.name);
   const now = new Date(), blocks = dayBlocks(now.getDay(), strengthType(now));
   const ids = [];
-  if (w.some(isRun) && !d.done.run) ids.push('run');
+  const runsW = w.filter(isRun), longW = runsW.filter((x) => x.km >= 2.5), shortW = runsW.filter((x) => !(x.km >= 2.5));
+  const hasLong = dayBlocks(new Date().getDay(), null).some((b) => b.id === 'longrun');
+  if (hasLong && longW.length && !d.done.longrun) ids.push('longrun');
+  if ((shortW.length || (longW.length && !hasLong)) && !d.done.run) ids.push('run');
   if (w.some(isStr) && !d.done.train) ids.push('train');
   if (w.some(isWalk) && !d.done.walk) ids.push('walk');
   const todo = ids.filter((id) => blocks.some((b) => b.id === id));
@@ -167,7 +170,9 @@ function xAuto() {
     todo.forEach((id) => {
       const b = bl.find((x) => x.id === id);
       dd.done[id] = { t: Date.now(), xp: baseXp(b, now.getDay()), auto: true };
-      if (id === 'run' && !dd.km) { const km = w.filter(isRun).reduce((a, x) => a + (x.km || 0), 0); if (km) dd.km = String(Math.round(km * 100) / 100); }
+      const sumKm = (arr) => String(Math.round(arr.reduce((a, x) => a + (x.km || 0), 0) * 100) / 100);
+      if (id === 'run' && !dd.km) { const src = shortW.length ? shortW : runsW; if (src.length) dd.km = sumKm(src); }
+      if (id === 'longrun' && !dd.kmLong && longW.length) dd.kmLong = sumKm(longW);
     });
   });
   toast('🤖 Automatisch abgehakt: ' + todo.map((i) => (i === 'run' ? 'Lauf' : i === 'train' ? 'Training' : 'Spaziergang')).join(', '), 'gold');
@@ -202,7 +207,7 @@ function xRuns() {
     const d = load(k);
     const rs = (d.workouts || []).filter((w) => /run|lauf|jog/i.test(w.name) && w.km > 0);
     rs.forEach((w) => out.push({ key: k, km: w.km, min: w.min, pace: w.min && w.km ? w.min / w.km : null, hr: w.avgHr }));
-    if (!rs.length && d.km && parseFloat(d.km) > 0) out.push({ key: k, km: parseFloat(d.km), min: null, pace: null });
+    if (!rs.length) [d.km, d.kmLong].forEach((v) => { if (v && parseFloat(v) > 0) out.push({ key: k, km: parseFloat(v), min: null, pace: null }); });
   });
   return out;
 }
@@ -312,8 +317,8 @@ function xReview() {
   const ds = upto.map((k) => ({ k, d: load(k) }));
   const avgC = upto.length ? Math.round((upto.reduce((a, k) => a + completion(k), 0) / upto.length) * 100) : 0;
   const xp = ds.reduce((a, o) => a + dayXp(o.d), 0);
-  const trains = ds.filter((o) => o.d.done.train).length, runs = ds.filter((o) => o.d.done.run).length;
-  const km = ds.reduce((a, o) => a + (parseFloat(o.d.km) || 0), 0);
+  const trains = ds.filter((o) => o.d.done.train).length, runs = ds.reduce((a, o) => a + (o.d.done.run ? 1 : 0) + (o.d.done.longrun ? 1 : 0), 0);
+  const km = ds.reduce((a, o) => a + (parseFloat(o.d.km) || 0) + (parseFloat(o.d.kmLong) || 0), 0);
   const sc = ds.map((o) => o.d.sleep && sleepScore(o.d.sleep)).filter(Boolean).map((s) => s.score);
   const ws = ds.map((o) => o.d.health && o.d.health.weight).filter(Boolean);
   const moods = ds.map((o) => o.d.checkin && o.d.checkin.am).filter((c) => c && c.m).map((c) => c.m);

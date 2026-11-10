@@ -56,7 +56,8 @@ function baseXp(b, dow) {
   if (b.id === 'train') return 50;
   if (b.id === 'trade1' || b.id === 'trade2') return 25;
   if (b.id === 'prep') return 15;
-  if (b.id === 'run') return dow === 2 || dow === 5 ? 35 : 20;
+  if (b.id === 'longrun') return 35;
+  if (b.id === 'run') return 20;
   if (b.id === 'journal' || b.id === 'sleep') return 15;
   return 10;
 }
@@ -87,6 +88,7 @@ function stats() {
     if (d.bonus > 0) perfect++;
     if (d.done.train) trainings++;
     if (d.done.run) runs++;
+    if (d.done.longrun) runs++;
   });
   return { checks, perfect, trainings, runs, streak: streak() };
 }
@@ -248,7 +250,8 @@ function renderToday() {
     const nowTag = st === 'now' ? '<span class="tag now">JETZT</span>' : '';
     let body = '';
     if (b.km) {
-      body += `<div class="km"><input data-km inputmode="decimal" placeholder="km" value="${d.km ?? ''}"><span>km gelaufen</span></div>`;
+      const isLong = b.id === 'longrun';
+      body += `<div class="km"><input data-km="${isLong ? 'long' : 'main'}" inputmode="decimal" placeholder="km" value="${(isLong ? d.kmLong : d.km) ?? ''}"><span>km gelaufen</span></div>`;
     }
     if (b.training) body += trainingHtml(type, d, key, expanded === 'train');
     return `<div class="card ${st} ${b.training ? 'bosscard' : ''}">
@@ -538,7 +541,7 @@ document.addEventListener('change', (e) => {
 document.addEventListener('input', (e) => {
   const el = e.target;
   const key = todayKey();
-  if (el.dataset.km !== undefined) { const d = load(key); d.km = el.value; save(key, d); return; }
+  if (el.dataset.km !== undefined) { const d = load(key); d[el.dataset.km === 'long' ? 'kmLong' : 'km'] = el.value; save(key, d); return; }
   if (el.dataset.ex) {
     const type = strengthType(new Date());
     const ex = EXERCISES[type].items.find((x) => x.id === el.dataset.ex);

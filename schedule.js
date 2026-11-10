@@ -64,9 +64,7 @@ function dayBlocks(dow, type) {
 
   add('wake', '07:30', 'Aufstehen, Wasser trinken', { icon: '☀️' });
 
-  if (dow === 2) add('run', '07:40', '3–4 km locker laufen', { icon: '🏃', km: true });
-  else if (dow === 5) add('run', '07:40', '4–6 km locker laufen', { icon: '🏃', km: true });
-  else add('run', '07:40', '1 km laufen', { icon: '🏃', km: true });
+  add('run', '07:40', '1 km laufen', { icon: '🏃', km: true });
 
   add('shower', '08:05', 'Duschen & fertig machen', { icon: '🚿' });
   add('breakfast', '08:20', 'Frühstück', { icon: '🍳' });
@@ -77,6 +75,10 @@ function dayBlocks(dow, type) {
 
   if (strength) {
     add('train', '13:30', type ? `Training: Ganzkörper ${type}` : 'Krafttraining (Ganzkörper A/B)', { icon: '💪', end: '14:30', training: type || true });
+  } else if (dow === 2) {
+    add('longrun', '13:30', 'Training: 3–4 km locker laufen', { icon: '🏃', end: '14:30', km: true });
+  } else if (dow === 5) {
+    add('longrun', '13:30', 'Training: 4–6 km locker laufen', { icon: '🏃', end: '14:30', km: true });
   } else if (dow === 3) {
     add('walk', '13:30', 'Spaziergang', { icon: '🚶', end: '14:00' });
   } else if (dow === 0) {
